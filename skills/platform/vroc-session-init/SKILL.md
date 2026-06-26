@@ -9,6 +9,11 @@ description: >
   loaded yet in the session. This skill MUST run before any SSC, Driftnet, or Strike API calls
   are attempted in a new session. Always run it automatically if a .vroc_keys file is present
   in uploads and tokens are not yet in the environment.
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: platform
 ---
 
 # VROC Session Init

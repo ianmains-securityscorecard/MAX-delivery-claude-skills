@@ -14,6 +14,11 @@ description: >
   prefer this skill over raw bulk triage when findings with hostnames may be
   present — it prevents mis-attributed findings from being reported to the wrong
   customer. Requires SSC_API_TOKEN loaded in environment (run vroc-session-init first).
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: triage
 ---
 
 # MAX Hostname-Aware Triage Skill

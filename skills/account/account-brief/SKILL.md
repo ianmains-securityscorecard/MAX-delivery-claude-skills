@@ -13,6 +13,11 @@ description: >
   "create the brief for [client]", "run account brief", "initialize account
   context", "set up the brief". Do NOT use for project manifest setup
   (use project-setup) or weekly delivery (use max-weekly-delivery).
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: account
 ---
 
 # Account Brief Skill

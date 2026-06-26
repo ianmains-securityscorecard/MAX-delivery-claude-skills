@@ -8,6 +8,11 @@ description: >
   for [client]", or any Weekly_Vendor_Report file upload. Default run context is a
   Cowork session with GDrive mapped. Do NOT use for Monthly ROI, QBR, ZDaaS
   notifications, reactive breach reports, or slide building (separate skill).
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: delivery
 ---
 
 # Weekly Analyst Summary & PPTX Rebuild

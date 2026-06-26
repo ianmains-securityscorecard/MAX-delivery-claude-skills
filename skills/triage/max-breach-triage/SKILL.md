@@ -11,6 +11,11 @@ description: >
   MAX workstation breach queue. Always use this skill — do not attempt breach
   triage without it; the decision rules are non-obvious and the API headers are
   breach-specific. Requires vroc-session-init to have been run first.
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: triage
 ---
 
 # MAX Breach Triage Skill

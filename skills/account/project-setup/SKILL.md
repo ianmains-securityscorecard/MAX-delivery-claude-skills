@@ -8,6 +8,11 @@ description: >
   Trigger on "set up this project", "create the manifest", "initialize this project",
   "run project setup", or "first time setup for [client]". Also trigger automatically
   when weekly-analyst-summary detects a missing manifest.
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: account
 ---
 
 # Project Setup — Customer Manifest Builder

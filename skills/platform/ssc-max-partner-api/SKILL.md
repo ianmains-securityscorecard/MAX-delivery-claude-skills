@@ -10,6 +10,11 @@ description: >
   findings or breaches, pull vendor lists, check customer lists, or build any automation
   against the MAX partner endpoints. Note: MAX API is currently in BETA — always use the
   correct version header for each endpoint (breaches require "deprecated"; all others use "beta").
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: platform
 ---
 
 # SSC MAX Partner API Skill

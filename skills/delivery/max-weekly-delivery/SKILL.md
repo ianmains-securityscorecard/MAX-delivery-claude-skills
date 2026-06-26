@@ -10,6 +10,11 @@ description: >
   "send", "email", or "stage" — delivery is almost always the next step. Do NOT use for
   analyst summaries (weekly-analyst-summary), findings triage (max-findings-triage),
   breach/CVE notifications (zdaas-report), QBR decks, or ROI reports.
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: delivery
 ---
 
 # MAX Weekly Delivery Skill

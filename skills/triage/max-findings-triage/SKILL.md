@@ -9,6 +9,11 @@ description: >
   report, or update any MAX workstation items in bulk. Always use this skill — do
   not attempt MAX bulk triage without it; the correct endpoint and headers are
   non-obvious and differ from the standard MAX API conventions.
+version: 1.0
+last_updated: 2026-06-25
+owner: ian.mains@securityscorecard.io
+status: active
+category: triage
 ---
 
 # MAX Findings & Breaches Triage Skill
