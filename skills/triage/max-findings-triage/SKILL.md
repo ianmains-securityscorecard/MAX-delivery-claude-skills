@@ -2,15 +2,20 @@
 name: max-findings-triage
 description: >
   Bulk triage SecurityScorecard MAX partner findings and breaches — marking them as
-  report=true and/or triaged=true via the MAX partner API. Use this skill whenever
-  the user asks to triage findings, mark findings as report, bulk update findings,
-  clear the untriaged backlog, or push findings/breaches to report in the MAX
-  workstation. Also trigger when the user asks to triage breaches, mark breaches as
-  report, or update any MAX workstation items in bulk. Always use this skill — do
-  not attempt MAX bulk triage without it; the correct endpoint and headers are
-  non-obvious and differ from the standard MAX API conventions.
-version: 1.0
-last_updated: 2026-06-25
+  report=true and/or triaged=true via the MAX partner API. Findings that carry a
+  hostname are ownership-verified against Driftnet before being marked report=true
+  (see Step 0) — a finding is never bulk-approved on attribution alone, whether that
+  attribution was automatic or a prior manual edit. Use this skill whenever the user
+  asks to triage findings, mark findings as report, bulk update findings, clear the
+  untriaged backlog, or push findings/breaches to report in the MAX workstation.
+  Also trigger when the user asks to triage breaches, mark breaches as report, or
+  update any MAX workstation items in bulk. Always use this skill — do not attempt
+  MAX bulk triage without it; the correct endpoint and headers are non-obvious and
+  differ from the standard MAX API conventions. This is the fallback path for
+  findings with no hostname (nothing to ownership-check); for the full
+  hostname-aware two-tier flow prefer `max-hostname-triage` when it applies.
+version: 1.1
+last_updated: 2026-08-13
 owner: ian.mains@securityscorecard.io
 status: active
 category: triage
@@ -19,10 +24,14 @@ category: triage
 # MAX Findings & Breaches Triage Skill
 
 Bulk-updates MAX partner findings and/or breaches to `report=true / triaged=true`
-using the correct BETA endpoint and header.
+using the correct BETA endpoint and header — with a Driftnet ownership check gating
+`report=true` for any finding that carries a hostname, so bulk triage can't silently
+rubber-stamp a mis-attributed finding just because it's sitting in the untriaged pile.
 
-> **Prerequisites:** SSC_API_TOKEN must be loaded in the environment.
-> Run the `vroc-session-init` skill first if keys are not yet loaded.
+> **Prerequisites:** `SSC_API_TOKEN` and `DRIFTNET_API_TOKEN` must be loaded in the
+> environment. Run the `vroc-session-init` skill first if keys are not yet loaded.
+> Without `DRIFTNET_API_TOKEN`, hostname-bearing findings are held rather than
+> auto-approved — see Step 0.
 
 ---
 
@@ -103,35 +112,153 @@ print(f"Fetched {len(all_findings):,} findings")
 
 ---
 
-## Step 2 — Batch PUT Findings (Chunks of 100)
+## Step 0 — Digital-Footprint Ownership Check (Driftnet)
+
+Before anything gets `report=true`, every fetched finding that carries a `hostname`
+is checked against Driftnet: does the ASN / TLS cert / entity currently observed at
+that hostname actually match the vendor it's flagged against, right now? String
+equality between the hostname and the vendor's domain is **not** ownership evidence
+— a vendor's own exact domain can resolve to shared CDN/cloud infrastructure. This
+was confirmed live (2026-08-13) against real MAX findings: `verizon.com` resolves to
+Akamai; `lumen.com` resolves to a Fastly node serving a *different* Fastly
+customer's TLS certificate. Both are the vendor's own domain string — neither is
+the vendor's own infrastructure.
+
+**This check runs regardless of whether the finding was previously edited by a
+human** (`edited_by` populated). A manual edit is a one-time judgment call, not
+standing proof the infrastructure hasn't since moved onto shared infra — see the
+`feedback_manual_attribution_scrutiny` note if you're extending this further.
+Findings with no `hostname` at all have nothing to ownership-check and proceed
+through the normal bulk path unchanged.
 
 ```python
-batch = [
-    {
-        "finding_id": f["finding_id"],
-        "vendor_id":  f["vendor_id"],
-        "report":     True,
-        "triaged":    True,
-    }
-    for f in all_findings
+DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # confirm exact paths against
+                                                     # docs/DRIFTNET_API_REFERENCE.md
+DRIFTNET_TOKEN = os.environ.get("DRIFTNET_API_TOKEN")
+
+SHARED_INFRA_MARKERS = [
+    "akamai", "cloudflare", "fastly", "amazon", "aws", "microsoft azure",
+    "google cloud", "digitalocean", "ovh", "securityscorecard",
 ]
 
-CHUNK_SIZE = 100  # Hard API limit — do not exceed
-chunks = [batch[i:i+CHUNK_SIZE] for i in range(0, len(batch), CHUNK_SIZE)]
-print(f"Sending {len(chunks)} PUT requests...")
+def _driftnet_get(path, params):
+    if not DRIFTNET_TOKEN:
+        return None
+    try:
+        r = requests.get(f"{DRIFTNET_BASE_URL}{path}",
+            headers={"Authorization": f"Bearer {DRIFTNET_TOKEN}"}, params=params, timeout=15)
+        return r.json() if r.status_code == 200 else None
+    except requests.RequestException:
+        return None
 
-success, failed = 0, 0
-for i, chunk in enumerate(chunks):
-    r = requests.put(f"{BASE}/max/partner/findings",
-        headers=HEADERS_WRITE, json={"findings": chunk}, timeout=30)
-    if r.status_code in (200, 204):
-        success += len(chunk)
-    else:
-        failed += len(chunk)
-        print(f"[ERROR] Chunk {i+1}: {r.status_code} — {r.text[:200]}")
-    time.sleep(0.05)
+def root_domain(d):
+    parts = d.lower().strip().rstrip(".").split(".")
+    return parts[-2] if len(parts) >= 2 else parts[0]
 
-print(f"✓ Updated: {success:,}  ✗ Failed: {failed:,}")
+def driftnet_ownership_verdict(hostname, vendor_domain):
+    """Returns one of: CONFIRMED, SHARED_INFRA_MISMATCH, NO_DNS_RECORD,
+    UNVERIFIABLE, AMBIGUOUS. Only CONFIRMED should ever justify report=True —
+    everything else, fail closed (hold), never fail open (auto-approve)."""
+    owner = root_domain(vendor_domain)
+
+    dns = _driftnet_get("/dns/forward", {"expression": f"host={hostname}"})
+    if dns is None:
+        return "UNVERIFIABLE"
+    records = dns.get("reports") or dns.get("records") or []
+    if not records:
+        return "NO_DNS_RECORD"
+
+    ips = [i["value"] for i in records[0].get("items", [])
+           if i.get("type") == "ip" and i.get("context", "").startswith("dns-a")]
+    if not ips:
+        return "AMBIGUOUS"
+
+    scan = _driftnet_get("/scans/protocols", {"ip": ips[0], "most_recent": "true"})
+    scan_records = (scan or {}).get("reports") or (scan or {}).get("records") or []
+    if not scan_records:
+        return "UNVERIFIABLE"
+
+    hay = " ".join(
+        str(i["value"]) for rep in scan_records for i in rep.get("items", [])
+        if i.get("type") in ("entity", "asn", "subject", "host") and i.get("value")
+    ).lower()
+
+    owner_present = owner in hay
+    shared_hit = next((m for m in SHARED_INFRA_MARKERS if m in hay and m not in owner), None)
+    if shared_hit and not owner_present:
+        return "SHARED_INFRA_MISMATCH"
+    if owner_present:
+        return "CONFIRMED"
+    return "AMBIGUOUS"
+
+
+def _has_hostname(f):
+    return str(f.get("hostname", "")).strip() not in ("", "nan", "None")
+
+with_hostname    = [f for f in all_findings if _has_hostname(f)]
+with_hostname_ids = {f["finding_id"] for f in with_hostname}
+without_hostname = [f for f in all_findings if f["finding_id"] not in with_hostname_ids]
+
+print(f"\nFindings with hostname (ownership-checked): {len(with_hostname):,}")
+print(f"Findings with no hostname (bulk path, unchanged): {len(without_hostname):,}")
+
+verdict_cache = {}
+verified_ok, verified_mismatch, held = [], [], []
+for f in with_hostname:
+    key = (f["hostname"], f["vendor_domain"])
+    if key not in verdict_cache:
+        verdict_cache[key] = driftnet_ownership_verdict(*key)
+    v = verdict_cache[key]
+    if f.get("edited_by") and v != "CONFIRMED":
+        print(f"  ⚠ manually-edited finding overridden: {f['vendor_name']} / {f['hostname']} → {v}")
+    if v == "CONFIRMED":
+        verified_ok.append(f)
+    elif v in ("SHARED_INFRA_MISMATCH", "NO_DNS_RECORD"):
+        verified_mismatch.append(f)
+    else:  # UNVERIFIABLE, AMBIGUOUS
+        held.append(f)
+
+print(f"  Driftnet CONFIRMED:          {len(verified_ok):,}  → report=True")
+print(f"  Driftnet MISMATCH/no-DNS:    {len(verified_mismatch):,}  → report=False")
+print(f"  Driftnet UNVERIFIABLE/AMBIG: {len(held):,}  → held, left untriaged")
+```
+
+---
+
+## Step 2 — Batch PUT Findings (Chunks of 100)
+
+Three separate batches now, instead of one blanket `report=True`: confirmed +
+no-hostname findings go `report=True`; Driftnet mismatches go `report=False`; held
+findings are skipped entirely (left `triaged=false` for a human to look at — do
+NOT fold them into either batch).
+
+```python
+def put_batch(items, report_value):
+    if not items:
+        return 0, 0
+    batch = [{"finding_id": f["finding_id"], "vendor_id": f["vendor_id"],
+              "report": report_value, "triaged": True} for f in items]
+    chunks = [batch[i:i+100] for i in range(0, len(batch), 100)]  # hard API limit
+    success, failed = 0, 0
+    for i, chunk in enumerate(chunks):
+        r = requests.put(f"{BASE}/max/partner/findings",
+            headers=HEADERS_WRITE, json={"findings": chunk}, timeout=30)
+        if r.status_code in (200, 204):
+            success += len(chunk)
+        else:
+            failed += len(chunk)
+            print(f"[ERROR] Chunk {i+1}: {r.status_code} — {r.text[:200]}")
+        time.sleep(0.05)
+    return success, failed
+
+report_true_batch = verified_ok + without_hostname   # confirmed + nothing to check
+
+ok_true,  fail_true  = put_batch(report_true_batch, True)
+ok_false, fail_false = put_batch(verified_mismatch,  False)
+
+print(f"✓ report=True:  {ok_true:,}  ✗ failed: {fail_true:,}")
+print(f"✓ report=False: {ok_false:,}  ✗ failed: {fail_false:,}")
+print(f"  Held (untouched, left for review): {len(held):,}")
 ```
 
 ---
@@ -151,6 +278,12 @@ occur when new findings arrive during the fetch window — a second pass clears 
 ---
 
 ## Breaches — Same Pattern, Different Keys
+
+> **No Step 0 equivalent here.** Breach records don't carry a `hostname` — a
+> breach is reported against a vendor as a whole, not a specific asset, so
+> there's no per-host infrastructure to ownership-check against Driftnet.
+> This bulk-approve path is unchanged and intentionally so; it isn't a gap
+> that was overlooked.
 
 Replace `findings` with `breaches` throughout, and use `breach_id` instead of
 `finding_id`:
@@ -210,3 +343,14 @@ print(f"Customer untriaged: {resp.json().get('total'):,}")
   `/max/customer/findings` (different entitlements required).
 - After a large bulk triage, allow ~60 seconds before the workstation UI reflects
   the changes.
+- **Ownership check fails closed, not open.** If `DRIFTNET_API_TOKEN` is missing
+  or a Driftnet call errors/times out, affected findings land in `held`
+  (`UNVERIFIABLE`), not in the `report=True` batch. A verification outage should
+  never silently widen what gets auto-approved.
+- **A prior manual edit is not an exemption.** `edited_by` being set on a finding
+  does not skip Step 0 — Driftnet can and does override a standing manual
+  attribution when current infrastructure disagrees with it (logged with `⚠`).
+- **String domain equality ≠ ownership.** A finding's hostname matching the
+  vendor's domain textually says nothing about who operates the infrastructure
+  behind it today — see Step 0 for the `verizon.com`/`lumen.com` cases that
+  motivated this.

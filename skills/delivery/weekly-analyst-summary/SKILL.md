@@ -6,10 +6,12 @@ description: >
   and Outreach Status Update. Outputs reviewed analyst text ready for slide build.
   Trigger on "analyst summary", "weekly summary", "run the weekly", "write the weekly
   for [client]", or any Weekly_Vendor_Report file upload. Default run context is a
-  Cowork session with GDrive mapped. Do NOT use for Monthly ROI, QBR, ZDaaS
-  notifications, reactive breach reports, or slide building (separate skill).
-version: 1.0
-last_updated: 2026-06-25
+  Cowork session with GDrive mapped. Runs the max-weekly-footprint-audit Driftnet
+  ownership check on the datasheet (Step 3.5) before any analytical section reads
+  it. Do NOT use for Monthly ROI, QBR, ZDaaS notifications, reactive breach reports,
+  or slide building (separate skill).
+version: 1.1
+last_updated: 2026-08-13
 owner: ian.mains@securityscorecard.io
 status: active
 category: delivery
@@ -1182,6 +1184,32 @@ for _, row in platinum_vendors.iterrows():
 # Key factors: ip_reputation, network_security, application_security, patching_cadence
 # LA scores NOT available via this token
 ```
+
+---
+
+### Step 3.5 — Digital footprint audit (before any datasheet is read)
+
+**Run `max-weekly-footprint-audit` on `datasheet_path` (and each entry in
+`prior_datasheet_paths`) before Step 4 reads any of them.** This is not
+optional and not the same thing as triage having already run — weekly report
+generation isn't gated by workstation triage state, so a finding can reach a
+datasheet regardless of what triage did or didn't catch, and an attribution
+that was correct when it was first triaged can go stale if the underlying
+infrastructure later moves onto shared/CDN hosting.
+
+```bash
+python3 <max-weekly-footprint-audit>/scripts/audit_datasheet.py \
+    --in "{datasheet_path}" --out "{datasheet_path}.audited.xlsx" --mode both
+```
+
+Reassign `datasheet_path` (and each `prior_datasheet_paths` entry, run through
+the same audit) to the `.audited.xlsx` output before Step 4. "New Concerning
+Findings" and every other section built from `critical`/`high`/`cves` below
+must be the post-audit rows — otherwise the audit runs, quietly produces a
+correct verdict sheet, and the analyst text still cites something that was
+just excluded from underneath it. If the audit's `Excluded — Unverified
+Footprint` sheet is non-empty, mention the exclusion count in the run log so
+it isn't a silent change from what the customer saw last week.
 
 ---
 

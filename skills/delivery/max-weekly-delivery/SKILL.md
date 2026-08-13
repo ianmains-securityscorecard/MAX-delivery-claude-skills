@@ -2,16 +2,19 @@
 name: max-weekly-delivery
 description: >
   Orchestrates end-to-end weekly delivery for SSC MAX accounts: reads the PPTX and XLSX,
-  synthesizes a customer-facing blurb, uploads files to the MAX dashboard, stages a Gmail
-  draft to the POC, and posts a risk briefing Slack draft to the account channel. Use
-  whenever the user says "run the weekly delivery", "deliver this week's report", "stage
-  the weekly email", "full delivery for [client]", "MAX delivery", or "push the report
-  out". Also trigger when *Weekly_Vendor_Report*.pptx or *.xlsx is uploaded with "deliver",
-  "send", "email", or "stage" — delivery is almost always the next step. Do NOT use for
-  analyst summaries (weekly-analyst-summary), findings triage (max-findings-triage),
-  breach/CVE notifications (zdaas-report), QBR decks, or ROI reports.
-version: 1.0
-last_updated: 2026-06-25
+  runs a Driftnet digital-footprint audit on the datasheet before any analysis touches
+  it, synthesizes a customer-facing blurb, uploads files to the MAX dashboard, stages a
+  Gmail draft to the POC, and posts a risk briefing Slack draft to the account channel.
+  Use whenever the user says "run the weekly delivery", "deliver this week's report",
+  "stage the weekly email", "full delivery for [client]", "MAX delivery", or "push the
+  report out". Also trigger when *Weekly_Vendor_Report*.pptx or *.xlsx is uploaded with
+  "deliver", "send", "email", or "stage" — delivery is almost always the next step.
+  Do NOT use for analyst summaries (weekly-analyst-summary), findings triage
+  (max-findings-triage / max-hostname-triage), standalone footprint audits
+  (max-weekly-footprint-audit), breach/CVE notifications (zdaas-report), QBR decks,
+  or ROI reports.
+version: 1.1
+last_updated: 2026-08-13
 owner: ian.mains@securityscorecard.io
 status: active
 category: delivery
@@ -103,10 +106,41 @@ print(f"CVEs:       {len(cves)}")
 print(f"Vendors:    {len(ind_count)}")
 ```
 
+### 1b.5 — Digital Footprint Audit
+
+**Run before Phase 1c, every time — not just when something looks off.** Report
+generation is not gated by workstation triage, so a finding can reach this
+datasheet whether or not it was ever triaged, and whether or not its underlying
+infrastructure has since moved onto shared/CDN hosting since it was first
+attributed. Invoke the `max-weekly-footprint-audit` skill on `xlsx_path`:
+
+```bash
+python3 <max-weekly-footprint-audit>/scripts/audit_datasheet.py \
+    --in "{xlsx_path}" --out "{xlsx_path}.audited.xlsx" --mode both
+```
+
+Replace `xlsx_path` with the *audited* file for every downstream phase —
+Phase 1c's analyst summary, Phase 2.5's dashboard upload, and any attachment in
+Phase 3/4 should all read from `{xlsx_path}.audited.xlsx`, not the raw
+generator output. If the audit's `Excluded — Unverified Footprint` sheet is
+non-empty, surface it in the Gate-equivalent confirmation before continuing:
+
+```
+⚠ DIGITAL FOOTPRINT AUDIT — {n} finding(s) removed before analysis:
+  {domain}  →  {verdict}  ({reason})
+  ...
+Proceeding with the audited datasheet. Full detail in 'Digital Footprint Verdicts'.
+```
+
+This is a one-line addition to an existing phase, not a parallel process to
+remember — the point is that nobody downstream (analyst summary, the customer)
+ever sees a footprint claim this pipeline can't back up.
+
 ### 1c — Run full analyst summary
 
-Invoke the `weekly-analyst-summary` skill on the extracted data to produce the full
-analysis. This is the source of truth for the blurb written in Phase 2.
+Invoke the `weekly-analyst-summary` skill on the *audited* data (from 1b.5) to
+produce the full analysis. This is the source of truth for the blurb written in
+Phase 2.
 
 If `weekly-analyst-summary` has already run this session, use that output directly.
 
@@ -366,7 +400,8 @@ If Phase 2.5 upload failed, replace the MAX dashboard line with:
 
 ## Dependencies
 
-- `weekly-analyst-summary` — full analytical output (Phase 1c input)
-- `vroc-session-init` — optional; needed only for live API enrichment in analyst summary
+- `max-weekly-footprint-audit` — Driftnet ownership audit (Phase 1b.5, runs before analysis)
+- `weekly-analyst-summary` — full analytical output (Phase 1c input, reads audited data)
+- `vroc-session-init` — needed for `DRIFTNET_API_TOKEN` (Phase 1b.5) and live API enrichment (analyst summary)
 - Gmail MCP (`Gmail:create_draft`)
 - Slack MCP (`Slack:slack_send_message_draft`, `Slack:slack_search_channels`)
