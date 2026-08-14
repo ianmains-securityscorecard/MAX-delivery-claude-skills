@@ -47,8 +47,9 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 import requests
 
-DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # confirm paths against
-                                                     # docs/DRIFTNET_API_REFERENCE.md
+DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # paths confirmed live 2026-08-14
+                                                     # against driftnet.io's own /v1/docs
+                                                     # (spec at /swagger.json)
 
 SHARED_INFRA_MARKERS = [
     "akamai", "cloudflare", "fastly", "amazon", "aws", "microsoft azure",
@@ -93,11 +94,11 @@ def driftnet_ownership_verdict(token, hostname, claimed_owner):
     (verdict, reason, evidence_dict)."""
     owner = root_domain(claimed_owner)
 
-    dns = _driftnet_get(token, "/dns/forward", {"expression": f"host={hostname}"})
+    dns = _driftnet_get(token, "/domain/fdns", {"expression": f"host={hostname}"})
     if dns is None:
         return "UNVERIFIABLE", "Driftnet DNS lookup failed or token missing.", {}
 
-    records = dns.get("reports") or dns.get("records") or []
+    records = dns.get("results") or []
     if not records:
         return "NO_DNS_RECORD", f"'{hostname}' has no DNS presence in Driftnet's corpus.", {}
 
@@ -121,8 +122,8 @@ def driftnet_ownership_verdict(token, hostname, claimed_owner):
     if not ips:
         return "AMBIGUOUS", "DNS record found but no A records parsed.", {}
 
-    scan = _driftnet_get(token, "/scans/protocols", {"ip": ips[0], "most_recent": "true"})
-    scan_records = (scan or {}).get("reports") or (scan or {}).get("records") or []
+    scan = _driftnet_get(token, "/scan/protocols", {"ip": ips[0], "most_recent": "true"})
+    scan_records = (scan or {}).get("results") or []
     if not scan_records:
         return "UNVERIFIABLE", f"No recent passive scan of {ips[0]}.", {}
 

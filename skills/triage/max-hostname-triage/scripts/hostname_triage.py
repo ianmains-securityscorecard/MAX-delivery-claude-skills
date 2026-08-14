@@ -33,12 +33,14 @@ BATCH_SIZE        = 100         # MAX API hard limit per PUT
 FETCH_WORKERS     = 10          # Parallel page fetches
 PUT_WORKERS       = 8           # Parallel PUT batches
 BASE_URL          = "https://api.securityscorecard.io"
-DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # confirm paths below against
-                                                     # docs/DRIFTNET_API_REFERENCE.md —
-                                                     # these mirror the driftnet_query
-                                                     # MCP tool's forward_dns/scan_protocols
-                                                     # operations but the exact REST path
-                                                     # has not been independently verified.
+DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # paths confirmed live 2026-08-14
+                                                     # against driftnet.io's own /v1/docs
+                                                     # (redoc, spec at /swagger.json) —
+                                                     # NOT /dns/forward or /scans/protocols,
+                                                     # those 404. Real paths are
+                                                     # /domain/fdns and /scan/protocols,
+                                                     # and the response envelope key is
+                                                     # "results", not "reports"/"records".
 
 # Entities that mean "shared infrastructure", not "the vendor's own asset", when
 # they show up as the ASN/cert-issuer/PTR owner of a hostname that IS the vendor's
@@ -212,12 +214,12 @@ def driftnet_ownership_verdict(hostname: str, vendor_domain: str) -> dict:
     """
     owner_token = extract_root_domain(vendor_domain).split(".")[0].lower()
 
-    dns = _driftnet_get("/dns/forward", {"expression": f"host={hostname}"})
+    dns = _driftnet_get("/domain/fdns", {"expression": f"host={hostname}"})
     if dns is None:
         return {"verdict": "UNVERIFIABLE", "action": "hold_for_review",
                 "reason": "Driftnet DNS lookup failed or token missing — cannot verify ownership."}
 
-    records = dns.get("reports") or dns.get("records") or []
+    records = dns.get("results") or []
     if not records:
         return {"verdict": "NO_DNS_RECORD", "action": "flag_mismatch",
                 "reason": f"'{hostname}' has no DNS presence in Driftnet's corpus — "
@@ -232,8 +234,8 @@ def driftnet_ownership_verdict(hostname: str, vendor_domain: str) -> dict:
         return {"verdict": "AMBIGUOUS", "action": "hold_for_review",
                 "reason": "DNS record found but no A records parsed — needs a human look."}
 
-    scan = _driftnet_get("/scans/protocols", {"ip": ips[0], "most_recent": "true"})
-    scan_records = (scan or {}).get("reports") or (scan or {}).get("records") or []
+    scan = _driftnet_get("/scan/protocols", {"ip": ips[0], "most_recent": "true"})
+    scan_records = (scan or {}).get("results") or []
     if not scan_records:
         return {"verdict": "UNVERIFIABLE", "action": "hold_for_review",
                 "reason": f"No recent passive scan of {ips[0]} to corroborate ownership."}

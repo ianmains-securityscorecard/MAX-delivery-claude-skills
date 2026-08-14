@@ -132,8 +132,9 @@ Findings with no `hostname` at all have nothing to ownership-check and proceed
 through the normal bulk path unchanged.
 
 ```python
-DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # confirm exact paths against
-                                                     # docs/DRIFTNET_API_REFERENCE.md
+DRIFTNET_BASE_URL = "https://api.driftnet.io/v1"   # paths confirmed live 2026-08-14
+                                                     # against driftnet.io's own /v1/docs
+                                                     # (spec at /swagger.json)
 DRIFTNET_TOKEN = os.environ.get("DRIFTNET_API_TOKEN")
 
 SHARED_INFRA_MARKERS = [
@@ -161,10 +162,10 @@ def driftnet_ownership_verdict(hostname, vendor_domain):
     everything else, fail closed (hold), never fail open (auto-approve)."""
     owner = root_domain(vendor_domain)
 
-    dns = _driftnet_get("/dns/forward", {"expression": f"host={hostname}"})
+    dns = _driftnet_get("/domain/fdns", {"expression": f"host={hostname}"})
     if dns is None:
         return "UNVERIFIABLE"
-    records = dns.get("reports") or dns.get("records") or []
+    records = dns.get("results") or []
     if not records:
         return "NO_DNS_RECORD"
 
@@ -173,8 +174,8 @@ def driftnet_ownership_verdict(hostname, vendor_domain):
     if not ips:
         return "AMBIGUOUS"
 
-    scan = _driftnet_get("/scans/protocols", {"ip": ips[0], "most_recent": "true"})
-    scan_records = (scan or {}).get("reports") or (scan or {}).get("records") or []
+    scan = _driftnet_get("/scan/protocols", {"ip": ips[0], "most_recent": "true"})
+    scan_records = (scan or {}).get("results") or []
     if not scan_records:
         return "UNVERIFIABLE"
 
